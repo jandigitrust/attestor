@@ -1,17 +1,17 @@
-Name: confido-server
+Name: attestor-server
 Version: 0.2.0
 Release: 1%{?dist}
-Summary: Confido Server
+Summary: Attestor evidence collector
 
 License: Apache-2.0
-URL: https://github.com/jandigitrust/confido
+URL: https://github.com/jandigitrust/attestor
 Source0: LICENSE
 Source1: THIRD_PARTY_NOTICES.md
 Source2: %{name}-third-party-licenses.tar.gz
 Source3: %{name}
 
 %description
-Confido Server
+Attestor evidence collector
 
 %prep
 
@@ -26,7 +26,7 @@ tar -xzf %{SOURCE2} -C %{buildroot}%{_licensedir}/%{name}/
 
 %files
 %license %{_licensedir}/%{name}
-/usr/local/bin/confido-server
+/usr/local/bin/attestor-server
 
 %changelog
 * Mon Nov 23 2026 Pavel Nikonorov - 0.2.0-1

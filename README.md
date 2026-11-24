@@ -1,159 +1,59 @@
-# Confido 0.2
+# Attestor 0.2
 
-Confido is a portable **evidence verifier**. It accepts bytes, locally selected
-policy, an independent expected nonce and explicit evaluation time. It returns an
-`evidence_only` result. It opens no connection and creates no application session.
+Attestor collects challenge-bound evidence from an Azure AMD SEV-SNP confidential VM.
+It exposes the existing `POST /tee-report` wire contract for the Confido verifier
+and its other callers. The collector returns an SNP report, a signed vTPM quote,
+IMA measurements, and the configured certificate. It uses the pinned
+[Teraveri Evidence](https://github.com/teraveri/evidence) protocol and core crates
+to construct the response and reject inconsistent local snapshots.
 
-The supported `azure-snp-vtpm-ima/1` profile checks an AMD-signed report from
-an Azure confidential VM, links it to a virtual TPM quote, and compares the
-measured boot and kernel-module state with caller-approved reference values.
-The [security model](docs/security-model.md) explains the trust chain, roles,
-terminology, and limits for reviewers new to TEE attestation. The wire-v1
-certificate/IMA binding is specified by the shared Evidence protocol.
+Collection is not appraisal: Attestor does not decide whether the platform,
+reference values, application, or TLS peer is trustworthy. Confido supplies the
+verifier; a relying application separately authenticates its peer and decides
+whether to send traffic. The current evidence profile covers measured boot and
+kernel modules, not application code, models, GPU state, or external inference.
 
-```mermaid
-flowchart LR
-  C[Caller: collect bytes] --> V[Confido verifier]
-  P[Local policy, nonce, time] --> V
-  V --> R[Evidence result]
-  R --> A[Caller: transport and admission decision]
-```
+## Components
 
-## Packages
-
-| Directory | Responsibility |
-|---|---|
-| [Evidence](https://github.com/teraveri/evidence) | Shared Git source pinned by the Cargo manifests and lockfiles |
-| [Evidence protocol](https://github.com/teraveri/evidence/tree/main/protocol) | Wire v1 structures and binding transcript |
-| [Evidence core](https://github.com/teraveri/evidence/tree/main/core) | Shared SNP/HCL/quote parsing and collected-snapshot consistency checks |
-| [`lib/`](lib/README.md) | Portable synchronous verifier, policy and reference appraisal |
-| [`bindings/python/`](bindings/python/README.md) | `confido-verifier` distribution / `confido_verifier` import |
-| [`bindings/wasm/`](bindings/wasm/README.md) | Same verifier compiled to WASM |
-| [`server/`](server/README.md) | Native TPM/IMA collector and `/tee-report` HTTP endpoint |
-| [`client/`](client/README.md) | HTTP collection, explicit verification and historical replay |
-| [`extension/`](extension/README.md) | Local WASM worker, policy import, archive replay, permitted live retrieval |
-
-The chat application's native TLS transport lives in the sibling
-`confidential-ai-example/native_transport`, independently of this library.
-Build and acceptance helpers are indexed in [`scripts/`](scripts/README.md).
-The collector accepts a fresh challenge at `POST /tee-report`; `HEAD /tee-report`
-returns 204 for a credentialless TLS peer check. Callers select the HTTPS origin
-and verifier policy locally. The report endpoint does not choose trust anchors.
+| Path | Purpose |
+| --- | --- |
+| [`server/`](server/README.md) | Native SNP/vTPM/IMA collection, certificate configuration, and report endpoint. |
+| [`deploy/`](deploy/README.md) | Collector service templates for deployment operators. |
+| [`integration/`](integration/README.md) | Optional isolated acceptance with the sibling client and synthetic downstream responder. |
+| [`scripts/`](scripts/README.md) | Packaging and dependency attribution support. |
+| [`third_party/`](third_party/README.md) | Preserved upstream licences and provenance for binary releases. |
 
 ## Build and test
 
-Rust 1.98.0 and Cargo locks are pinned. Cargo fetches both Evidence crates
-directly from the public Teraveri Git repository at commit
-`900d420b0928c4693e1143aa33a33ab670147e3c`; no sibling checkout is
-needed. Each Confido package has its own lockfile and pins that same source.
-The verifier uses `ring` and a bounded X.509 profile; its runtime requires neither
-OpenSSL nor TPM2-TSS. `ring` compiles portable C with clang for WASM. OpenSSL is used
-only in native verifier test fixtures; the collector and application transport
-have their own native dependencies.
+Rust 1.98.0 is pinned in `rust-toolchain.toml`. The locked server graph pins
+Evidence 0.2.0 at commit `900d420b0928c4693e1143aa33a33ab670147e3c`.
+Install the native TPM2-TSS development libraries before building; see
+[BUILDING.md](BUILDING.md) for commands and package prerequisites.
 
-```sh
-cargo test --locked --manifest-path lib/Cargo.toml
-cargo test --locked --manifest-path server/Cargo.toml
-cargo build --locked --manifest-path client/Cargo.toml
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install 'maturin==1.15.0' jsonschema
-make -C bindings/python install PYTHON=python
-python -m unittest discover -s lib/tests -v
-python -m unittest discover -s tests -v
-python -m unittest discover -s server/tests -v
-```
+## Endpoint and deployment
 
-The Evidence repository runs its own workspace tests in CI; Confido's locked
-builds test the imported crates through their consumers.
+`POST /tee-report` accepts an `AttestationRequest` with a caller-supplied nonce
+and returns an `AttestationResponse`. The response includes the certificate used
+for the quote binding. `HEAD /tee-report` returns 204 without credentials so a
+caller can separately probe its observed HTTPS peer. The collector itself serves
+HTTP; deploy it behind the intended HTTPS frontend and use the same certificate
+and key there. A quote-bound certificate alone does not bind evidence to the
+caller's observed TLS session.
 
-Collector prerequisites on Ubuntu: `build-essential pkg-config perl clang
-libclang-dev libtss2-dev`; native test/transport builds compile vendored OpenSSL.
-Python wheels built here target CPython 3.10/Linux x86_64. Other ABI targets need
-separate builds and acceptance testing.
-
-### Collector launcher and HTTPS certificate
-
-`server/run.sh` defaults to `/etc/confido` when that deployment directory exists;
-otherwise it uses `/tmp/confido` for local development. Override with its second
-argument or `CONFIDO_CERTS_DIR`. The collector and Nginx must use the same leaf
-certificate and key. Cached `CA:TRUE` certificates are rejected at startup.
-The launcher validates certificate configuration before stopping an existing
-collector, including one managed by systemd. Generated development certificates
-explicitly contain `CA:FALSE`; deployed certificates are never silently replaced.
-
-## Python API
-
-```python
-import confido_verifier
-
-result = confido_verifier.verify(
-    report=report_bytes,
-    amd_chain=ask_plus_ark_pem,
-    vcek=vcek_der,
-    reference=exact_reference_bytes,
-    policy=local_verifier_policy_bytes,
-    expected_nonce=caller_nonce_32_bytes,
-    evaluation_time=caller_unix_seconds,
-)
-```
-
-`inspect_requirements(report_bytes)` returns **untrusted** chip/TCB selectors for
-caller-owned KDS retrieval. It never fetches anything. Invalid policy/context or
-outer size limits raise `ValueError`; evidence rejection is a structured result.
-The Rust API has the same inputs via `VerificationInput` and `VerificationContext`.
-The WASM wrapper accepts `Uint8Array` inputs and returns a JSON string.
-
-## CLI
-
-```sh
-client/target/debug/confido-cli collect ../confidential-ai-example/profiles/match.json /private/new-archive.json
-client/target/debug/confido-cli appraise ../confidential-ai-example/profiles/match.json /private/new-run.json
-client/target/debug/confido-cli verify ../confidential-ai-example/profiles/verifier-match.json archive.json EXPECTED_NONCE_BASE64 UNIX_SECONDS
-client/target/debug/confido-cli replay ../confidential-ai-example/profiles/verifier-match.json archive.json UNIX_SECONDS
-client/target/debug/confido-cli migrate-archive old-v1.json new-v2.json UNIX_SECONDS
-```
-
-`appraise` collects and verifies evidence only. `replay` deliberately uses a
-historical archived nonce; neither command grants live application access.
-The paths above are GENXT demo policies owned by `confidential-ai-example`;
-Confido consumes caller-supplied policy bytes and does not own their trust pins.
-Those default application profiles target the original Milan demo. For the
-current Genoa test VM, use the explicit stage policies in the
-[local acceptance checklist](docs/revision/rerun.md).
-Archives are created exclusively with mode 0600. Raw report/reference bytes are
-preserved in schema v2. CLI accepts legacy archives through its caller-side adapter.
-
-## Browser extension
-
-See [extension build and install](extension/README.md). Verification runs entirely
-inside its packaged WASM worker, with no native helper or remote verifier.
-Live retrieval uses only origins explicitly supplied at build time, plus AMD KDS
-and GitHub. Without an origin list, the extension supports local replay only.
-Local replay does not need host permissions. Safari packaging requires
-macOS/Xcode and is not certified by Linux browser tests.
-
-## Assurance boundary
-
-A matched challenge does not itself establish freshness. The caller owns nonce
-creation, deadlines and reuse prevention. A certificate-bound quote does not
-prove that certificate belongs to the observed TLS connection. **TLS session
-binding and relay resistance are unsupported.** Native callers must authenticate
-their actual peer separately before credentials or prompts.
-
-The enrolled reference covers boot aggregate/kernel modules, not applications,
-models, GPU state or external inference. The TCB floor and launch measurement are
-operator enrollments, not vulnerability-free certification. Revocation/advisory
-updates are not fetched by the verifier. AMD chain validation supports this fixed
-profile, not general-purpose PKIX path discovery.
-
-See the [documentation index](docs/README.md), [schema catalog](schemas/README.md)
-and [third-party notices](THIRD_PARTY_NOTICES.md).
+The launcher defaults to `/etc/confido` when that certificate directory exists
+for the current demo deployment, and otherwise uses `/tmp/confido` for local
+development. The directory can be overridden. Do not expose the HTTP collector
+outside the intended deployment boundary. The launcher validates certificate
+configuration before replacing a listener and only stops a recognized collector
+process. See [`server/README.md`](server/README.md) for details. The current
+GENXT demo service template is in [`deploy/genxt-demo/`](deploy/genxt-demo/).
 
 ## Origin and licence
 
-Confido began as [GENXT's attested TLS prototype](https://github.com/genxnetwork/confido).
-The [licensing issue](https://github.com/genxnetwork/confido/issues/8) records its
-move to open development and the plan for [JAN DIGITRUST](https://github.com/jandigitrust/confido)
-to develop the verifier for contribution upstream. Project-authored material is
-licensed under [Apache-2.0](LICENSE); third-party material retains its original terms.
+Attestor shares its pre-extraction Git history with
+[JAN Confido](https://github.com/jandigitrust/confido). Confido began as
+[GENXT's attested TLS prototype](https://github.com/elixir-cloud-aai/generic-issues/issues/17).
+The Attestor source starts from the signed Confido checkpoint
+[`89f2c28`](https://github.com/jandigitrust/confido/commit/89f2c288ca3cddeb5840f3b107b06d5568f2a81d).
+Project-authored material is [Apache-2.0](LICENSE); third-party material retains
+its original terms, recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

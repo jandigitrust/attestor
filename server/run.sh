@@ -13,7 +13,7 @@ if cargo build --locked; then
         args+=(--tls-hostname "$4")
     fi
 
-    binary="$PWD/target/debug/confido-server"
+    binary="$PWD/target/debug/attestor-server"
     echo "Collector certificate: ${args[1]}/certificate.pem"
     # A bad cached certificate must not take the existing collector offline.
     if ! sudo "$binary" "${args[@]}" --check-config; then

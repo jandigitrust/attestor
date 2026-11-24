@@ -1,156 +1,53 @@
-name: Build and Release
-
+name: Build Attestor RPM
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-
 permissions:
-  contents: write
-
+  contents: read
 jobs:
-  build:
-    name: Build and Package
+  package:
     runs-on: [self-hosted, fedora39]
-
+    timeout-minutes: 45
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-
-    - name: Require a version tag
-      run: |
-        case "$GITHUB_REF" in
-          refs/tags/v*) ;;
-          *) echo "Run this release workflow on a v* tag" >&2; exit 1 ;;
-        esac
-
-    - name: Require matching binary versions
-      run: |
-        version="${GITHUB_REF#refs/tags/v}"
-        for manifest in server/Cargo.toml client/Cargo.toml; do
-          package_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$manifest" | head -n 1)
-          if [ "$package_version" != "$version" ]; then
-            echo "$manifest has version $package_version, expected $version" >&2
-            exit 1
-          fi
-        done
-
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: 1.98.0
-
-    - name: Install Dependencies
-      run: |
-        sudo dnf install -y @development-tools openssl-devel pkgconfig tss2-devel tpm2-tss-devel rpm-build perl python3
-
-        # Check if Perl and FindBin module are installed
-        perl -e "use FindBin;" || { echo "Perl FindBin module not found!"; exit 1; }
-        
-        # Display Perl version for debugging
-        perl -v
-
-        # Check if tss2-sys library is available via pkg-config
-        if ! pkg-config --exists tss2-sys; then
-          echo "tss2-sys.pc not found! Ensure that tpm2-tss-devel package is installed."
-          exit 1
-        fi
-
-        # Display pkg-config flags for tss2-sys
-        pkg-config --cflags --libs tss2-sys
-
-    - name: Build Server Package
-      run: |
-        cd server
-        cargo build --locked --release
-
-    - name: Build CLI Package
-      run: |
-        cd client
-        cargo build --locked --release
-
-    - name: Collect release licences and third-party attribution
-      run: |
-        set -euo pipefail
-        mkdir -p rpmbuild/SOURCES
-        cp LICENSE THIRD_PARTY_NOTICES.md rpmbuild/SOURCES/
-        target=$(rustc -vV | sed -n 's/^host: //p')
-        for component in server client; do
-          cargo metadata --locked --format-version 1 --filter-platform "$target" --manifest-path "$component/Cargo.toml" > "$RUNNER_TEMP/confido-$component-metadata.json"
-          package_name="confido-$component"
-          if [ "$component" = "client" ]; then package_name="confido-cli"; fi
-          cp "$component/target/release/$package_name" "rpmbuild/SOURCES/$package_name"
-          python3 scripts/collect_licenses.py "$RUNNER_TEMP/confido-$component-metadata.json" "rpmbuild/SOURCES/$package_name-third-party-licenses.tar.gz"
-        done
-
-    - name: Create RPM Package for Server
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/v}
-        mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-        
-        # Use the correct path to the spec file in the repository
-        cp ./server/specs/confido-server.spec rpmbuild/SPECS/
-
-        # Update version in the spec file
-        sed -i "s/^Version:.*/Version: $VERSION/" rpmbuild/SPECS/confido-server.spec
-
-        # Build the RPM package
-        rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/confido-server.spec
-        mkdir -p package
-        cp rpmbuild/RPMS/x86_64/confido-server-$VERSION-1*.rpm package/confido-server-$VERSION.rpm
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-    - name: Create RPM Package for CLI
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/v}
-        mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-        
-        # Use the correct path to the spec file in the repository
-        cp ./client/specs/confido-cli.spec rpmbuild/SPECS/
-
-        # Update version in the spec file
-        sed -i "s/^Version:.*/Version: $VERSION/" rpmbuild/SPECS/confido-cli.spec
-
-        # Build the RPM package
-        rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/confido-cli.spec
-        cp rpmbuild/RPMS/x86_64/confido-cli-$VERSION-1*.rpm package/confido-cli-$VERSION.rpm
-
-    - name: Calculate Hash of Server RPM
-      id: calculate_hash
-      run: |
-        HASH=$(sha256sum package/confido-server-${GITHUB_REF#refs/tags/v}.rpm | cut -d ' ' -f 1)
-        echo "HASH=$HASH" >> $GITHUB_ENV
-
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: "Release ${{ github.ref }}"
-        body: |
-          **Server Package Hash:** ${{ env.HASH }}
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload Server Package
-      uses: actions/upload-release-asset@v1
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: package/confido-server-${{ env.VERSION }}.rpm
-        asset_name: confido-server-${{ env.VERSION }}.rpm
-        asset_content_type: application/octet-stream
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload CLI Package
-      uses: actions/upload-release-asset@v1
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: package/confido-cli-${{ env.VERSION }}.rpm
-        asset_name: confido-cli-${{ env.VERSION }}.rpm
-        asset_content_type: application/octet-stream
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require a matching version tag
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "Run this workflow on a v* tag" >&2; exit 1 ;;
+          esac
+          version="${GITHUB_REF#refs/tags/v}"
+          package_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' server/Cargo.toml | head -n 1)
+          test "$package_version" = "$version"
+      - name: Native prerequisites
+        run: sudo dnf install -y @development-tools openssl-devel pkgconfig tss2-devel tpm2-tss-devel rpm-build perl python3
+      - name: Build and test
+        run: |
+          cargo test --locked --manifest-path server/Cargo.toml
+          cargo build --locked --release --manifest-path server/Cargo.toml
+          python3 -m unittest discover -s server/tests -v
+          python3 -m unittest discover -s tests -v
+      - name: Package RPM with notices
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/v}"
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS} package
+          cp LICENSE THIRD_PARTY_NOTICES.md rpmbuild/SOURCES/
+          cp server/target/release/attestor-server rpmbuild/SOURCES/
+          target=$(rustc -vV | sed -n 's/^host: //p')
+          cargo metadata --locked --format-version 1 --filter-platform "$target" --manifest-path server/Cargo.toml > "$RUNNER_TEMP/attestor-metadata.json"
+          python3 scripts/collect_licenses.py "$RUNNER_TEMP/attestor-metadata.json" rpmbuild/SOURCES/attestor-server-third-party-licenses.tar.gz
+          cp server/specs/attestor-server.spec rpmbuild/SPECS/
+          sed -i "s/^Version:.*/Version: $version/" rpmbuild/SPECS/attestor-server.spec
+          rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/attestor-server.spec
+          cp rpmbuild/RPMS/x86_64/attestor-server-"$version"-1*.rpm package/attestor-server-"$version".rpm
+          sha256sum package/attestor-server-"$version".rpm > package/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: attestor-rpm
+          path: package/

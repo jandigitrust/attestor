@@ -1,12 +1,12 @@
 [package]
 license = "Apache-2.0"
-repository = "https://github.com/jandigitrust/confido"
-name = "confido_server"
+repository = "https://github.com/jandigitrust/attestor"
+name = "attestor-server"
 version = "0.2.0"
 edition = "2021"
 
 [[bin]]
-name = "confido-server"
+name = "attestor-server"
 path = "src/main.rs"
 
 [dependencies]
