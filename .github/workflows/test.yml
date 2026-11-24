@@ -2,7 +2,7 @@ name: Test Attestor
 on:
   pull_request:
   push:
-    branches: [master, main, refactor/extract-attestor]
+    branches: [main]
 permissions:
   contents: read
 jobs:
