@@ -148,7 +148,7 @@ impl Attester {
     }
 }
 
-async fn atls_http_route(
+async fn tee_report_route(
     data: web::Json<AttestationRequest>,
     certificate: Arc<X509>,
     algorithms: Arc<Vec<vtpm::Algorithm>>,
@@ -287,7 +287,7 @@ fn generate_certificate(
 async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
-    let matches = clap::App::new("Confido Evidence Collector")
+    let matches = clap::App::new("Attestor Evidence Collector")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Collects challenge-bound evidence with the configured HTTPS certificate")
         .arg(
@@ -331,7 +331,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Save private key and certificate into the provided certs_folder
     let private_key_path = format!("{}/private_key.pem", certs_folder);
     let certificate_path = format!("{}/certificate.pem", certs_folder);
-    // let fullchain_path = format!("{}/fullchain.pem", certs_folder);
 
     let key_exists = Path::new(&private_key_path).exists();
     let cert_exists = Path::new(&certificate_path).exists();
@@ -387,8 +386,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    // let fullchain_pem = fs::read(fullchain_path)?;
-    // let certificate = X509::from_pem(&fullchain_pem)?;
     let certificate = Arc::new(certificate);
 
     let mut algorithms = Vec::new();
@@ -421,7 +418,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 "/tee-report",
                 web::post().to(move |data: web::Json<AttestationRequest>| {
                     info!("http server report route called");
-                    atls_http_route(
+                    tee_report_route(
                         data,
                         Arc::clone(&certificate),
                         Arc::clone(&algorithms),

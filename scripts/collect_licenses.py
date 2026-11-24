@@ -13,16 +13,7 @@ import tarfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_CRATES = {
-    PROJECT_ROOT / name
-    for name in (
-        "lib",
-        "client",
-        "server",
-        "bindings/python",
-        "bindings/wasm",
-    )
-}
+PROJECT_CRATES = {PROJECT_ROOT / "server"}
 ATTRIBUTION_PREFIXES = (
     "license",
     "licence",

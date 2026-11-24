@@ -1,67 +1,28 @@
-name: Test
+name: Test Attestor
 on:
   pull_request:
   push:
-    branches: [master, revision/attestation-update]
+    branches: [master, main, refactor/extract-attestor]
 permissions:
   contents: read
 jobs:
-  portable:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: confido
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: confido
-          persist-credentials: false
-      - name: Portable build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang perl python3-dev python3-venv
-          rustup toolchain install 1.98.0 --profile minimal
-          rustup default 1.98.0
-          rustup target add wasm32-unknown-unknown
-      - name: Core and CLI
-        run: |
-          cargo test --locked --manifest-path lib/Cargo.toml
-          cargo build --locked --manifest-path client/Cargo.toml
-          python3 scripts/check_verifier_dependencies.py
-      - name: Installed Python package
-        run: |
-          python3 -m venv .venv
-          . .venv/bin/activate
-          python -m pip install 'maturin==1.15.0' jsonschema playwright
-          make -C bindings/python install PYTHON=python
-          python -m unittest discover -s lib/tests -v
-          python -m unittest discover -s tests -v
-      - name: Browser worker and MV3 extension
-        run: |
-          cargo install wasm-bindgen-cli --version 0.2.100 --locked
-          python3 extension/build.py
-          python3 extension/build.py --browser firefox
-          . .venv/bin/activate
-          python -m playwright install --with-deps chromium firefox
-          python scripts/browser_checks.py
   collector:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: confido
     steps:
       - uses: actions/checkout@v4
         with:
-          path: confido
           persist-credentials: false
-      - name: Native collector prerequisites
+      - name: Native prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config perl clang libclang-dev libtss2-dev
           rustup toolchain install 1.98.0 --profile minimal
           rustup default 1.98.0
-      - run: cargo test --locked --manifest-path server/Cargo.toml
-      - run: cargo build --locked --manifest-path server/Cargo.toml
-      - run: python3 -m unittest discover -s server/tests -p 'test_launcher.py' -v
+      - name: Format, build and test
+        run: |
+          cargo fmt --manifest-path server/Cargo.toml -- --check
+          cargo test --locked --manifest-path server/Cargo.toml
+          cargo build --locked --manifest-path server/Cargo.toml
+          python3 -m unittest discover -s server/tests -v
+          python3 -m unittest discover -s tests -v

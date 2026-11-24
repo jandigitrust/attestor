@@ -55,7 +55,7 @@ fn creates_private_keys_with_owner_only_permissions() {
     let rsa = Rsa::generate(2048).unwrap();
     let key = PKey::from_rsa(rsa).unwrap();
     let path = std::env::temp_dir().join(format!(
-        "confido-key-test-{}-{}",
+        "attestor-key-test-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -101,7 +101,7 @@ async fn rejects_invalid_nonce_oversize_and_busy_before_tpm_access() {
             .route(
                 "/tee-report",
                 web::post().to(move |data: web::Json<AttestationRequest>| {
-                    atls_http_route(
+                    tee_report_route(
                         data,
                         Arc::clone(&certificate),
                         Arc::clone(&algorithms),

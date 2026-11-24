@@ -22,7 +22,7 @@ class LauncherTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
 
-    def listener(self, name="confido-server"):
+    def listener(self, name="attestor-server"):
         binary = Path(self.temp.name) / name
         shutil.copyfile(sys.executable, binary)
         binary.chmod(0o755)
@@ -55,6 +55,11 @@ class LauncherTests(unittest.TestCase):
         self.assertIsNotNone(process.poll())
         self.assertFalse(launcher.listeners(address))
 
+    def test_legacy_collector_can_be_replaced(self):
+        process, address = self.listener("confido-server")
+        launcher.stop(address)
+        self.assertIsNotNone(process.poll())
+
     def test_systemd_service_stopped_before_it_can_restart(self):
         process, address = self.listener()
         real_run = subprocess.run
@@ -66,18 +71,18 @@ class LauncherTests(unittest.TestCase):
             return real_run(command, **kwargs)
 
         with (
-            patch.object(launcher, "service", return_value="confido-test.service"),
+            patch.object(launcher, "service", return_value="attestor-test.service"),
             patch.object(launcher.subprocess, "run", side_effect=run_command) as run,
         ):
             launcher.stop(address)
         run.assert_any_call(
-            ["systemctl", "stop", "confido-test.service"], check=True, timeout=20
+            ["systemctl", "stop", "attestor-test.service"], check=True, timeout=20
         )
         self.assertFalse(launcher.listeners(address))
 
     def test_unrelated_listener_is_preserved(self):
         process, address = self.listener("unrelated-server")
-        with self.assertRaisesRegex(RuntimeError, "non-Confido"):
+        with self.assertRaisesRegex(RuntimeError, "unrelated process"):
             launcher.stop(address)
         self.assertIsNone(process.poll())
 
@@ -86,11 +91,11 @@ class LauncherTests(unittest.TestCase):
             patch.object(
                 launcher.Path,
                 "read_text",
-                return_value="0::/system.slice/confido.service\n",
+                return_value="0::/system.slice/attestor.service\n",
             ),
             patch.object(launcher.subprocess, "check_output", return_value="123\n"),
         ):
-            self.assertEqual(launcher.service(123), "confido.service")
+            self.assertEqual(launcher.service(123), "attestor.service")
             self.assertIsNone(launcher.service(456))
 
     def run_script(self, fail=False):

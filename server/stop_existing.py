@@ -1,4 +1,4 @@
-"""Stop Confido listeners that conflict with the requested Linux bind address."""
+"""Stop known collectors that conflict with the requested Linux bind address."""
 
 import ipaddress
 import os
@@ -8,6 +8,8 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+
+KNOWN_COLLECTORS = {"attestor-server", "confido-server"}
 
 
 def endpoint(value):
@@ -77,26 +79,26 @@ def stop(address):
             processes.append((pid, fd))
             if select.select([fd], [], [], 0)[0]:
                 continue
-            if Path(executable(pid)).name != "confido-server":
+            if Path(executable(pid)).name not in KNOWN_COLLECTORS:
                 raise RuntimeError(
-                    f"Port is occupied by non-Confido process {pid}; refusing to stop it"
+                    f"Port is occupied by an unrelated process {pid}; refusing to stop it"
                 )
         for pid, fd in processes:
             if select.select([fd], [], [], 0)[0]:
                 continue
             # Recheck ownership before asking systemd to stop a service.
-            if Path(executable(pid)).name != "confido-server":
+            if Path(executable(pid)).name not in KNOWN_COLLECTORS:
                 raise RuntimeError(
                     f"Process {pid} changed executable; refusing to stop it"
                 )
             unit = service(pid)
             if unit:
                 print(
-                    f"Stopping {unit} (confido-server {pid}) on {address}", flush=True
+                    f"Stopping {unit} (collector {pid}) on {address}", flush=True
                 )
                 subprocess.run(["systemctl", "stop", unit], check=True, timeout=20)
             else:
-                print(f"Stopping confido-server {pid} on {address}", flush=True)
+                print(f"Stopping collector {pid} on {address}", flush=True)
                 signal.pidfd_send_signal(fd, signal.SIGTERM)
             if not select.select([fd], [], [], 5)[0]:
                 signal.pidfd_send_signal(fd, signal.SIGKILL)

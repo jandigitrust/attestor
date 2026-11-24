@@ -1,4 +1,4 @@
-"""Packaging keeps dependency notices without recursively including its own output."""
+"""Packaging preserves notices from the resolved dependency graph."""
 
 import json
 import sys
@@ -10,11 +10,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from collect_licenses import collect
-from prepare_attribution import prepare
 
 
 class AttributionTests(unittest.TestCase):
-    def test_downstream_package_uses_own_license_and_excludes_generated_output(self):
+    def test_project_crate_is_excluded_from_dependency_inventory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             package = root / "native"
@@ -22,7 +21,6 @@ class AttributionTests(unittest.TestCase):
             dependency = root / "dependency"
             output.mkdir(parents=True)
             dependency.mkdir()
-            (root / "LICENSE").write_text("downstream project licence")
             (output / "third-party-licenses.tar.gz").write_bytes(b"old archive")
             (dependency / "LICENSE").write_text("dependency licence")
             metadata = {
@@ -39,18 +37,10 @@ class AttributionTests(unittest.TestCase):
                     },
                 ],
             }
-            with patch(
-                "prepare_attribution.subprocess.check_output",
-                return_value=json.dumps(metadata),
-            ):
-                prepare(
-                    package / "Cargo.toml",
-                    output,
-                    root,
-                    target="x86_64-unknown-linux-gnu",
-                )
-            self.assertEqual(
-                (output / "LICENSE").read_text(), "downstream project licence"
+            collect(
+                metadata,
+                output / "third-party-licenses.tar.gz",
+                project_crates={package},
             )
             with tarfile.open(output / "third-party-licenses.tar.gz") as archive:
                 inventory = json.load(archive.extractfile("third-party/packages.json"))
